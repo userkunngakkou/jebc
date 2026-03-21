@@ -1,0 +1,136 @@
+lang.c {
+#include <stdint.h>
+
+extern "C" {
+    // 🛡️ [WASM/Client] GFWのDPI検知を回避するためのXOR難読化処理
+    // JEBCの仕様通り sharedBuffer を直接操作して高速化
+    void xor_cipher(uint8_t* buffer, int length, uint8_t key) {
+        for (int i = 0; i < length; i++) {
+            buffer[i] ^= key;
+        }
+    }
+}
+}
+
+lang.ts {
+// 🔑 共通キー設定 (サーバー/クライアント間で共有)
+const XOR_KEY = 0x88;
+
+// =========================================================
+// ☁️ [Server] Cloudflare Workers 用のエントリポイント
+// =========================================================
+// JEBC (esbuild) は ESM で出力するため、export default がそのままWorkerの起点になります
+export default {
+    async fetch(request: Request, env: any, ctx: any) {
+        // WebSocketのアップグレードリクエスト（VPN通信）を処理
+        if (request.headers.get("Upgrade") === "websocket") {
+            const [client, server] = Object.values(new WebSocketPair() as any);
+            server.accept();
+
+            server.addEventListener("message", async (event: any) => {
+                try {
+                    const data = new Uint8Array(event.data);
+                    // 1. URLの復号 (XOR)
+                    for (let i = 0; i < data.length; i++) data[i] ^= XOR_KEY;
+                    const url = new TextDecoder().decode(data);
+
+                    // 2. GFWの外側(Cloudflare)からターゲットへアクセス
+                    const targetResponse = await fetch(url, {
+                        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+                    });
+                    
+                    const bodyBuffer = await targetResponse.arrayBuffer();
+                    const bodyData = new Uint8Array(bodyBuffer);
+
+                    // 3. レスポンスの暗号化 (XOR)
+                    for (let i = 0; i < bodyData.length; i++) bodyData[i] ^= XOR_KEY;
+
+                    // 4. クライアントへ送信
+                    server.send(bodyData);
+                } catch (err: any) {
+                    const errorMsg = new TextEncoder().encode("Error: " + err.message);
+                    for (let i = 0; i < errorMsg.length; i++) errorMsg[i] ^= XOR_KEY;
+                    server.send(errorMsg);
+                }
+            });
+
+            return new Response(null, { status: 101, webSocket: client });
+        }
+
+        // 通常のHTTPリクエストの場合は、静的アセットへのアクセスとしてそのまま通す
+        // (Cloudflare Pagesでホスティングした場合のフォールバック)
+        return env.ASSETS ? env.ASSETS.fetch(request) : new Response("VPN Server Ready", { status: 200 });
+    }
+};
+}
+
+lang.ts {
+// =========================================================
+// 💻 [Client] ブラウザ (SPA UI & WASM) の処理
+// =========================================================
+// Worker環境(サーバー)では window が存在しないため、このブロックはブラウザでのみ実行されます
+if (typeof window !== "undefined") {
+    // JEBCが提供するグローバル変数を利用
+    const memoryView = new Uint8Array(sharedBuffer);
+    const WS_URL = location.protocol === "https:" ? `wss://${location.host}/` : `ws://${location.host}/`;
+    
+    let ws: WebSocket;
+
+    // UIの構築 (DOM構築)
+    const container = document.createElement("div");
+    container.innerHTML = `
+        <div style="font-family: sans-serif; padding: 20px;">
+            <h2>🔐 JEBC Web VPN Portal (GFW Bypass)</h2>
+            <input id="urlInput" type="text" value="https://ja.wikipedia.org/" style="width: 400px; padding: 5px;" />
+            <button id="fetchBtn" style="padding: 5px 10px;">Connect & Fetch</button>
+            <hr />
+            <div id="status" style="color: blue; margin-bottom: 10px;">Connecting...</div>
+            <iframe id="outputFrame" style="width: 100%; height: 600px; border: 1px solid #ccc; background: #fff;"></iframe>
+        </div>
+    `;
+    document.body.appendChild(container);
+
+    // WebSocket接続初期化
+    ws = new WebSocket(WS_URL);
+    ws.binaryType = "arraybuffer";
+    
+    ws.onopen = () => {
+        document.getElementById("status")!.textContent = "🟢 Secure Connection Established";
+    };
+
+    ws.onmessage = (event) => {
+        const data = new Uint8Array(event.data);
+        const len = data.length;
+        
+        // C++(WASM)で高速復号
+        memoryView.set(data, 0);
+        native.xor_cipher(0, len, XOR_KEY);
+        
+        const decrypted = memoryView.slice(0, len);
+        const iframe = document.getElementById("outputFrame") as HTMLIFrameElement;
+        iframe.srcdoc = new TextDecoder().decode(decrypted);
+        document.getElementById("status")!.textContent = "🟢 Fetch Complete!";
+    };
+    
+    ws.onerror = () => {
+        document.getElementById("status")!.textContent = "🔴 Connection Error (Blocked or Offline)";
+    };
+
+    // ボタン押下時の処理
+    document.getElementById("fetchBtn")!.onclick = () => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        
+        const url = (document.getElementById("urlInput") as HTMLInputElement).value;
+        const encoded = new TextEncoder().encode(url);
+        const len = encoded.length;
+        
+        // C++(WASM)でURLを難読化して送信
+        memoryView.set(encoded, 0);
+        native.xor_cipher(0, len, XOR_KEY);
+        ws.send(memoryView.slice(0, len));
+        
+        document.getElementById("status")!.textContent = "🟡 Fetching via GFW Bypass...";
+        (document.getElementById("outputFrame") as HTMLIFrameElement).srcdoc = "Loading...";
+    };
+}
+}

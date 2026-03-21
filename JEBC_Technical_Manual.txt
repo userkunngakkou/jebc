@@ -1,0 +1,453 @@
+# JEBC Technical Manual
+
+> **JEBC** — JavaScript/TypeScript + Emscripten Bundled Compiler  
+> Version 1.0 | Target Platform: Windows
+
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Requirements](#requirements)
+3. [Building JEBC](#building-jebc)
+4. [Input File Format (.jsbc / .tsbc / .tsxbc)](#input-file-format)
+5. [Usage](#usage)
+6. [Build Pipeline](#build-pipeline)
+7. [Output Structure](#output-structure)
+8. [WASM Glue Code & Runtime API](#wasm-glue-code--runtime-api)
+9. [Executable Aliasing](#executable-aliasing)
+10. [Architecture Reference](#architecture-reference)
+11. [Error Reference](#error-reference)
+12. [Examples](#examples)
+
+---
+
+## Overview
+
+JEBC is a single-file build tool that combines **C/C++ code** and **JavaScript/TypeScript code** into a ready-to-deploy web application. It reads a unified source file (`.jsbc`, `.tsbc`, or `.tsxbc`), compiles the C sections to **WebAssembly** via Emscripten, bundles the JS/TS sections via **esbuild**, and produces a complete `dist/` directory containing:
+
+- `native.wasm` — Compiled C/C++ as a WASM side module
+- `bundle.js` — Minified ESM JavaScript bundle
+- `index.html` — Minimal HTML page (auto-generated if missing)
+
+```
+┌─────────────────┐
+│  .tsxbc file     │
+│  ┌─── lang.c ──┐│     ┌─────────┐     ┌────────────────┐
+│  │  C/C++ code ││────>│  emcc   │────>│ dist/native.wasm│
+│  └─────────────┘│     └─────────┘     └────────────────┘
+│  ┌─── lang.js ─┐│     ┌─────────┐     ┌────────────────┐
+│  │  JS/TS code ││────>│ esbuild │────>│ dist/bundle.js  │
+│  └─────────────┘│     └─────────┘     └────────────────┘
+└─────────────────┘                      ┌────────────────┐
+                                         │ dist/index.html │
+                                         └────────────────┘
+```
+
+---
+
+## Requirements
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| **C++20 compiler** | Build `jebc.exe` itself | MSVC Build Tools or MinGW g++ |
+| **Emscripten (emcc)** | Compile C/C++ to WASM | [emsdk](https://emscripten.org/docs/getting_started/downloads.html) |
+| **esbuild** | Bundle JS/TS | `npm i -g esbuild` |
+
+> [!IMPORTANT]
+> Both `emcc` and `esbuild` must be accessible from the system PATH when running `jebc.exe`.
+
+---
+
+## Building JEBC
+
+Run the provided build script:
+
+```batch
+build_jebc.bat
+```
+
+The script automatically detects and uses the best available compiler:
+
+1. **MSVC** (cl.exe) — checked first, either already in PATH or discovered via `vswhere`
+2. **MinGW g++** — checked second, standard PATH locations + common install paths (`C:\msys64\mingw64\bin`, `C:\mingw64\bin`)
+
+On success, `jebc.exe` is created in the current directory.
+
+### Manual build (MSVC)
+
+```batch
+cl /std:c++20 /EHsc /O2 /Fe:jebc.exe jebc.cpp
+```
+
+### Manual build (g++)
+
+```batch
+g++ -std=c++20 -O2 -o jebc.exe jebc.cpp
+```
+
+---
+
+## Input File Format
+
+JEBC source files use a simple block-based format with `lang` directives. Three file extensions are supported:
+
+| Extension | Script Mode | Script blocks parsed |
+|-----------|------------|---------------------|
+| `.jsbc`   | JavaScript | `lang.js` |
+| `.tsbc`   | TypeScript | `lang.ts` (fallback: `lang.js`) |
+| `.tsxbc`  | TSX        | `lang.tsx` (fallback: `lang.js`) |
+
+### Syntax
+
+```
+lang.c {
+    // C/C++ code goes here
+    // Use extern "C" for WASM-exported functions
+}
+
+lang.js {
+    // JavaScript code goes here
+}
+
+lang.ts {
+    // TypeScript code goes here
+}
+
+lang.tsx {
+    // TSX code goes here
+}
+```
+
+### Syntax Rules
+
+- The keyword `lang` followed by a dot and the language identifier (`c`, `js`, `ts`, `tsx`), then `{` ... `}`
+- The dot separator is optional: both `lang.c { }` and `langc { }` are valid
+- Whitespace between `lang.X` and `{` is allowed
+- Multiple blocks of the same language are concatenated in order
+- Blocks inside comments or string literals are ignored (the parser is context-aware)
+- Every file **must** have at least one `lang.c` block and one script block matching the file extension
+
+### Example: `test.tsxbc`
+
+```
+lang.c {
+extern "C" {
+int add(int a, int b) {
+    return a + b;
+}
+}
+}
+
+lang.js {
+const value = native.add ? native.add(20, 22) : -1;
+const root = document.createElement("pre");
+root.textContent = `native.add(20, 22) = ${value}`;
+document.body.appendChild(root);
+}
+```
+
+---
+
+## Usage
+
+### Basic usage
+
+```batch
+jebc <input_file>
+```
+
+The mode (JS/TS/TSX) is auto-detected from the file extension.
+
+### Examples
+
+```batch
+jebc myapp.jsbc       # Build as JavaScript
+jebc myapp.tsbc       # Build as TypeScript
+jebc myapp.tsxbc      # Build as TSX
+```
+
+### Auto-detection mode
+
+If `jebc.exe` is renamed (or symlinked) to one of the following names, it detects the mode from its own executable name and automatically finds the input file in the current directory:
+
+| Executable name | Mode | Auto-finds |
+|----------------|------|------------|
+| `jsbc.exe`     | JS   | `*.jsbc` |
+| `tsbc.exe`     | TS   | `*.tsbc` |
+| `tsxbc.exe`    | TSX  | `*.tsxbc` |
+
+```batch
+:: Rename and use without arguments
+copy jebc.exe tsxbc.exe
+tsxbc
+:: Looks for a single .tsxbc file in the current directory
+```
+
+> [!NOTE]
+> Auto-detection requires **exactly one** matching file in the current directory.
+
+---
+
+## Build Pipeline
+
+When `jebc.exe <input>` is executed, the following steps occur:
+
+### Step 1: Mode Detection
+The output mode (JS/TS/TSX) is determined by:
+1. The input file extension (highest priority)
+2. The executable name (`jsbc.exe`, `tsbc.exe`, `tsxbc.exe`)
+
+### Step 2: Section Parsing
+The input file is scanned for `lang.c { ... }` and `lang.<mode> { ... }` blocks. The parser:
+- Builds a **code mask** to identify real code vs. comments/strings
+- Uses regex to locate `lang` directives
+- Extracts brace-matched blocks with proper nesting
+
+### Step 3: Intermediate File Generation
+Two files are written to `.bc_build/`:
+- `core.cpp` — All `lang.c` blocks concatenated
+- `entry.<ext>` — WASM glue code + all script blocks concatenated
+
+### Step 4: WASM Compilation (emcc)
+```
+emcc .bc_build/core.cpp -O3 -s WASM=1 -s SIDE_MODULE=1 --no-entry -o dist/native.wasm
+```
+
+Key flags:
+- `-O3` — Maximum optimization
+- `-s SIDE_MODULE=1` — Build as a side module (loaded dynamically)
+- `--no-entry` — No `main()` function expected
+
+### Step 5: JS/TS Bundling (esbuild)
+```
+esbuild .bc_build/entry.<ext> --bundle --minify --format=esm --outfile=dist/bundle.js
+```
+
+Key flags:
+- `--bundle` — Resolve and inline all imports
+- `--minify` — Minimize output size
+- `--format=esm` — Output as ES module
+
+### Step 6: HTML Generation
+If `dist/index.html` does not already exist, a minimal HTML file is generated with a `<script type="module">` tag pointing to `bundle.js`.
+
+---
+
+## Output Structure
+
+```
+project/
+├── input.tsxbc          # Your source file
+├── .bc_build/           # Intermediate build files
+│   ├── core.cpp         # Extracted C code
+│   ├── entry.tsx        # Glue code + extracted script
+│   ├── emcc.stderr.log  # emcc error output (if any)
+│   └── esbuild.stderr.log
+└── dist/                # Final output (serve this directory)
+    ├── native.wasm      # Compiled C → WASM
+    ├── bundle.js        # Bundled JS/TS (ESM)
+    └── index.html       # HTML entry point
+```
+
+> [!TIP]
+> Serve the `dist/` directory with any HTTP server to run your app. Example: `npx serve dist`
+
+---
+
+## WASM Glue Code & Runtime API
+
+JEBC automatically injects glue code that loads `native.wasm` and exposes the following globals:
+
+### `native` (Object)
+All functions exported from C code via `extern "C"` are available as properties:
+
+```javascript
+// C code (in lang.c block):
+// extern "C" { int add(int a, int b) { return a + b; } }
+
+// JS code (in lang.js block):
+const result = native.add(21, 21);  // 42
+```
+
+### `sharedBuffer` (SharedArrayBuffer)
+A 16 MB shared buffer for high-performance data exchange between JS and WASM:
+
+```javascript
+const view = new Uint8Array(sharedBuffer);
+```
+
+### `sharedMemory` (WebAssembly.Memory)
+The shared linear memory instance (256 pages = 16 MB):
+
+```javascript
+const memView = new Uint8Array(sharedMemory.buffer);
+```
+
+### Loading Mechanism
+
+The glue code uses a two-stage loading strategy:
+1. **Primary**: `WebAssembly.instantiateStreaming()` — Fast streaming compilation
+2. **Fallback**: `WebAssembly.instantiate()` with `arrayBuffer()` — For environments that don't support streaming
+
+> [!IMPORTANT]
+> `SharedArrayBuffer` requires the page to be served with COOP/COEP headers:
+> ```
+> Cross-Origin-Opener-Policy: same-origin
+> Cross-Origin-Embedder-Policy: require-corp
+> ```
+
+---
+
+## Executable Aliasing
+
+JEBC supports being renamed to operate in a specific mode without specifying file extensions:
+
+```
+jebc.exe  →  Generic mode (requires explicit file argument)
+jsbc.exe  →  JavaScript mode (auto-finds .jsbc files)
+tsbc.exe  →  TypeScript mode (auto-finds .tsbc files)
+tsxbc.exe →  TSX mode (auto-finds .tsxbc files)
+```
+
+This is detected via `argv[0]` at runtime; no recompilation needed.
+
+---
+
+## Architecture Reference
+
+### Source Code Layout (`jebc.cpp`)
+
+| Section | Lines | Description |
+|---------|-------|-------------|
+| String utilities | `toLower` | Case conversion |
+| Path utilities | `isSlash` .. `absolutePath` | Platform path handling (Win32) |
+| Filesystem ops | `pathExists` .. `listCurrentRegularFiles` | File/directory checks and listing |
+| File I/O | `readFileText`, `writeFileText` | Binary-mode file read/write |
+| Command helpers | `checkCommandAvailable`, `runCommandWithCapturedStderr` | External tool invocation |
+| Code mask | `buildCodeMask` | Comment/string literal detection |
+| Block extraction | `extractBlock` | Brace-matched block parser |
+| Section parser | `parseSections` | `lang.X { }` block extractor |
+| Code generation | `makeGlueCode`, `makeMinimalIndexHtml` | Template generators |
+| Mode detection | `detectModeByArgv0`, `detectModeByExt` | Build mode resolution |
+| Mode helpers | `modeToScriptKind`, `modeToEntryName`, `findInputByMode` | Mode ↔ string mapping |
+| Main | `main` | Orchestrates the full pipeline |
+
+### Parser Details
+
+The parser handles:
+- **Single-line comments** (`//`)
+- **Block comments** (`/* */`)
+- **Single-quoted strings** (`'...'`)
+- **Double-quoted strings** (`"..."`)
+- **Template literals** (`` ` `` ... `` ` ``)
+- **Escape sequences** (`\\`) within all string types
+- **Nested braces** (correct depth tracking)
+
+---
+
+## Error Reference
+
+| Error Message | Cause | Fix |
+|---------------|-------|-----|
+| `Unsupported file extension` | Input file has unrecognized extension | Use `.jsbc`, `.tsbc`, or `.tsxbc` |
+| `Input file not specified` | No file argument and auto-detect found 0 or 2+ files | Pass explicit path or keep exactly 1 matching file |
+| `Failed to open input file` | File does not exist or is not readable | Check the file path |
+| `No lang.c { ... } section found` | Input file has no C code block | Add a `lang.c { }` section |
+| `No lang.X { ... } section found` | No script block matching the mode | Add the appropriate `lang.js/ts/tsx { }` section |
+| `emcc was not found in PATH` | Emscripten not installed or not activated | Run `emsdk activate` and ensure `emcc` is in PATH |
+| `esbuild was not found in PATH` | esbuild not installed | Run `npm i -g esbuild` |
+| `emcc build failed` | C code compilation error | Check C code in `lang.c` block; see `.bc_build/emcc.stderr.log` |
+| `esbuild bundle failed` | JS/TS bundling error | Check script code; see `.bc_build/esbuild.stderr.log` |
+| `Failed to create build directories` | Permission or disk error | Check write permissions |
+
+---
+
+## Examples
+
+### Minimal Example (JavaScript)
+
+**`hello.jsbc`**
+```
+lang.c {
+extern "C" {
+    int multiply(int a, int b) {
+        return a * b;
+    }
+}
+}
+
+lang.js {
+const result = native.multiply(6, 7);
+document.body.innerHTML = `<h1>6 × 7 = ${result}</h1>`;
+}
+```
+
+```batch
+jebc hello.jsbc
+:: Output → dist/native.wasm, dist/bundle.js, dist/index.html
+```
+
+### TSX Example with DOM Manipulation
+
+**`app.tsxbc`**
+```
+lang.c {
+extern "C" {
+    int fibonacci(int n) {
+        if (n <= 1) return n;
+        int a = 0, b = 1;
+        for (int i = 2; i <= n; i++) {
+            int tmp = a + b;
+            a = b;
+            b = tmp;
+        }
+        return b;
+    }
+}
+}
+
+lang.tsx {
+const container = document.createElement('div');
+for (let i = 0; i < 10; i++) {
+    const el = document.createElement('p');
+    el.textContent = `fib(${i}) = ${native.fibonacci(i)}`;
+    container.appendChild(el);
+}
+document.body.appendChild(container);
+}
+```
+
+```batch
+jebc app.tsxbc
+```
+
+### Multi-Block Example
+
+Multiple `lang` blocks of the same kind are concatenated:
+
+```
+lang.c {
+extern "C" {
+    int add(int a, int b) { return a + b; }
+}
+}
+
+lang.c {
+extern "C" {
+    int sub(int a, int b) { return a - b; }
+}
+}
+
+lang.js {
+console.log("add:", native.add(10, 5));
+}
+
+lang.js {
+console.log("sub:", native.sub(10, 5));
+}
+```
+
+---
+
+> **JEBC** — Write C and JS in one file. Ship to the web.
