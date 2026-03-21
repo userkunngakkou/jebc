@@ -1,0 +1,467 @@
+# JEBC 技術マニュアル
+
+> **JEBC** — JavaScript/TypeScript + Emscripten Bundled Compiler  
+> バージョン 1.0 | 対応プラットフォーム: Windows
+
+---
+
+## 目次
+
+1. [概要](#概要)
+2. [必要環境](#必要環境)
+3. [JEBCのビルド](#jebcのビルド)
+4. [入力ファイル形式 (.jsbc / .tsbc / .tsxbc)](#入力ファイル形式)
+5. [使い方](#使い方)
+6. [ビルドパイプライン](#ビルドパイプライン)
+7. [出力構成](#出力構成)
+8. [WASMグルーコードとランタイムAPI](#wasmグルーコードとランタイムapi)
+9. [実行ファイルのエイリアス](#実行ファイルのエイリアス)
+10. [アーキテクチャリファレンス](#アーキテクチャリファレンス)
+11. [エラーリファレンス](#エラーリファレンス)
+12. [サンプルコード集](#サンプルコード集)
+
+---
+
+## 概要
+
+JEBCは **C/C++コード** と **JavaScript/TypeScriptコード** を一つのファイルにまとめ、
+すぐにデプロイ可能なWebアプリケーションを生成するシングルファイル・ビルドツールです。
+
+統合ソースファイル（`.jsbc`、`.tsbc`、または `.tsxbc`）を読み込み、
+Cセクションを **Emscripten** で **WebAssembly** にコンパイルし、
+JS/TSセクションを **esbuild** でバンドルして、以下を含む `dist/` ディレクトリを出力します：
+
+- `native.wasm` — C/C++をコンパイルしたWASMサイドモジュール
+- `bundle.js` — ミニファイ済みESM JavaScriptバンドル
+- `index.html` — 最小限のHTMLページ（存在しなければ自動生成）
+
+```
+┌─────────────────┐
+│  .tsxbc ファイル  │
+│  ┌─── lang.c ──┐│     ┌─────────┐     ┌────────────────┐
+│  │  C/C++コード ││────>│  emcc   │────>│ dist/native.wasm│
+│  └─────────────┘│     └─────────┘     └────────────────┘
+│  ┌─── lang.js ─┐│     ┌─────────┐     ┌────────────────┐
+│  │  JS/TSコード ││────>│ esbuild │────>│ dist/bundle.js  │
+│  └─────────────┘│     └─────────┘     └────────────────┘
+└─────────────────┘                      ┌────────────────┐
+                                         │ dist/index.html │
+                                         └────────────────┘
+```
+
+---
+
+## 必要環境
+
+| ツール | 用途 | インストール方法 |
+|--------|------|-----------------|
+| **C++20 コンパイラ** | `jebc.exe` 自体のビルド | MSVC Build Tools または MinGW g++ |
+| **Emscripten (emcc)** | C/C++ を WASM にコンパイル | [emsdk](https://emscripten.org/docs/getting_started/downloads.html) |
+| **esbuild** | JS/TS のバンドル | `npm i -g esbuild` |
+
+> [!重要]
+> `emcc` と `esbuild` は、`jebc.exe` 実行時にシステムの PATH から
+> アクセスできる状態でなければなりません。
+
+---
+
+## JEBCのビルド
+
+付属のビルドスクリプトを実行します：
+
+```batch
+build_jebc.bat
+```
+
+スクリプトは利用可能な最適なコンパイラを自動検出して使用します：
+
+1. **MSVC** (cl.exe) — 最初にチェック。PATHにあるか、`vswhere` で自動検出
+2. **MinGW g++** — 次にチェック。標準PATH + よくあるインストール先
+   (`C:\msys64\mingw64\bin`、`C:\mingw64\bin`)
+
+成功すると、カレントディレクトリに `jebc.exe` が生成されます。
+
+### 手動ビルド（MSVC）
+
+```batch
+cl /std:c++20 /EHsc /O2 /Fe:jebc.exe jebc.cpp
+```
+
+### 手動ビルド（g++）
+
+```batch
+g++ -std:c++20 -O2 -o jebc.exe jebc.cpp
+```
+
+---
+
+## 入力ファイル形式
+
+JEBCのソースファイルは `lang` ディレクティブを使ったシンプルなブロックベースの形式です。
+3種類のファイル拡張子に対応しています：
+
+| 拡張子 | スクリプトモード | 解析されるブロック |
+|--------|-----------------|-------------------|
+| `.jsbc`   | JavaScript | `lang.js` |
+| `.tsbc`   | TypeScript | `lang.ts`（フォールバック: `lang.js`） |
+| `.tsxbc`  | TSX        | `lang.tsx`（フォールバック: `lang.js`） |
+
+### 構文
+
+```
+lang.c {
+    // C/C++ コードをここに記述
+    // WASM にエクスポートする関数は extern "C" で囲む
+}
+
+lang.js {
+    // JavaScript コードをここに記述
+}
+
+lang.ts {
+    // TypeScript コードをここに記述
+}
+
+lang.tsx {
+    // TSX コードをここに記述
+}
+```
+
+### 構文ルール
+
+- キーワード `lang` の後にドットと言語識別子（`c`、`js`、`ts`、`tsx`）を書き、`{` ... `}` で囲む
+- ドット区切りは省略可能：`lang.c { }` と `langc { }` のどちらも有効
+- `lang.X` と `{` の間にスペースを入れても構わない
+- 同じ言語のブロックが複数ある場合、出現順に連結される
+- コメントや文字列リテラル内のブロックは無視される（パーサーはコンテキストを認識する）
+- すべてのファイルには **少なくとも1つの `lang.c` ブロック** と、拡張子に対応する **スクリプトブロック** が必要
+
+### 例：`test.tsxbc`
+
+```
+lang.c {
+extern "C" {
+int add(int a, int b) {
+    return a + b;
+}
+}
+}
+
+lang.js {
+const value = native.add ? native.add(20, 22) : -1;
+const root = document.createElement("pre");
+root.textContent = `native.add(20, 22) = ${value}`;
+document.body.appendChild(root);
+}
+```
+
+---
+
+## 使い方
+
+### 基本的な使い方
+
+```batch
+jebc <入力ファイル>
+```
+
+モード（JS/TS/TSX）はファイル拡張子から自動検出されます。
+
+### 実行例
+
+```batch
+jebc myapp.jsbc       # JavaScript としてビルド
+jebc myapp.tsbc       # TypeScript としてビルド
+jebc myapp.tsxbc      # TSX としてビルド
+```
+
+### 自動検出モード
+
+`jebc.exe` を以下の名前にリネーム（またはシンボリックリンク）すると、
+実行ファイル名からモードを検出し、カレントディレクトリの入力ファイルを自動的に探します：
+
+| 実行ファイル名 | モード | 自動検索対象 |
+|---------------|--------|-------------|
+| `jsbc.exe`    | JS     | `*.jsbc` |
+| `tsbc.exe`    | TS     | `*.tsbc` |
+| `tsxbc.exe`   | TSX    | `*.tsxbc` |
+
+```batch
+:: リネームして引数なしで使用
+copy jebc.exe tsxbc.exe
+tsxbc
+:: カレントディレクトリ内の .tsxbc ファイルを自動で探します
+```
+
+> [!注意]
+> 自動検出は、カレントディレクトリに対応するファイルが **ちょうど1つ** ある場合にのみ動作します。
+
+---
+
+## ビルドパイプライン
+
+`jebc.exe <入力ファイル>` を実行すると、以下のステップが順に実行されます：
+
+### ステップ 1：モード検出
+出力モード（JS/TS/TSX）は以下の優先順位で決定されます：
+1. 入力ファイルの拡張子（最優先）
+2. 実行ファイル名（`jsbc.exe`、`tsbc.exe`、`tsxbc.exe`）
+
+### ステップ 2：セクション解析
+入力ファイルから `lang.c { ... }` と `lang.<モード> { ... }` ブロックを走査します。
+パーサーの動作：
+- **コードマスク** を構築してコメント・文字列リテラルとを識別
+- 正規表現で `lang` ディレクティブの位置を特定
+- 波括弧のネストを正しく追跡してブロック内容を抽出
+
+### ステップ 3：中間ファイル生成
+`.bc_build/` ディレクトリに2つのファイルが生成されます：
+- `core.cpp` — すべての `lang.c` ブロックを連結したもの
+- `entry.<拡張子>` — WASMグルーコード + すべてのスクリプトブロックを連結したもの
+
+### ステップ 4：WASMコンパイル（emcc）
+```
+emcc .bc_build/core.cpp -O3 -s WASM=1 -s SIDE_MODULE=1 --no-entry -o dist/native.wasm
+```
+
+主要フラグ：
+- `-O3` — 最大レベルの最適化
+- `-s SIDE_MODULE=1` — サイドモジュールとしてビルド（動的にロード）
+- `--no-entry` — `main()` 関数が不要であることを示す
+
+### ステップ 5：JS/TSバンドル（esbuild）
+```
+esbuild .bc_build/entry.<拡張子> --bundle --minify --format=esm --outfile=dist/bundle.js
+```
+
+主要フラグ：
+- `--bundle` — すべてのimportを解決してインライン化
+- `--minify` — 出力サイズを最小化
+- `--format=esm` — ESモジュール形式で出力
+
+### ステップ 6：HTML生成
+`dist/index.html` がまだ存在しない場合、`bundle.js` を読み込む
+`<script type="module">` タグを含む最小限のHTMLファイルが自動生成されます。
+
+---
+
+## 出力構成
+
+```
+プロジェクト/
+├── input.tsxbc          # ソースファイル
+├── .bc_build/           # 中間ビルドファイル
+│   ├── core.cpp         # 抽出されたCコード
+│   ├── entry.tsx        # グルーコード + 抽出されたスクリプト
+│   ├── emcc.stderr.log  # emccのエラー出力（あれば）
+│   └── esbuild.stderr.log
+└── dist/                # 最終出力（このディレクトリを配信する）
+    ├── native.wasm      # C → WASM コンパイル結果
+    ├── bundle.js        # バンドル済み JS/TS（ESM）
+    └── index.html       # HTMLエントリポイント
+```
+
+> [!ヒント]
+> `dist/` ディレクトリを任意のHTTPサーバーで配信すればアプリが動作します。
+> 例：`npx serve dist`
+
+---
+
+## WASMグルーコードとランタイムAPI
+
+JEBCは `native.wasm` をロードするグルーコードを自動的に注入し、
+以下のグローバル変数を提供します：
+
+### `native`（Object）
+Cコードで `extern "C"` を使ってエクスポートした関数はすべてプロパティとして利用可能です：
+
+```javascript
+// Cコード（lang.c ブロック内）:
+// extern "C" { int add(int a, int b) { return a + b; } }
+
+// JSコード（lang.js ブロック内）:
+const result = native.add(21, 21);  // 42
+```
+
+### `sharedBuffer`（SharedArrayBuffer）
+JSとWASM間の高性能データ交換用の 16MB 共有バッファです：
+
+```javascript
+const view = new Uint8Array(sharedBuffer);
+```
+
+### `sharedMemory`（WebAssembly.Memory）
+共有リニアメモリインスタンスです（256ページ = 16MB）：
+
+```javascript
+const memView = new Uint8Array(sharedMemory.buffer);
+```
+
+### ロードの仕組み
+
+グルーコードは2段階のロード戦略を使用します：
+1. **優先**: `WebAssembly.instantiateStreaming()` — 高速なストリーミングコンパイル
+2. **フォールバック**: `WebAssembly.instantiate()` + `arrayBuffer()` — ストリーミング非対応環境用
+
+> [!重要]
+> `SharedArrayBuffer` を使用するには、ページが以下のCOOP/COEPヘッダー付きで
+> 配信される必要があります：
+> ```
+> Cross-Origin-Opener-Policy: same-origin
+> Cross-Origin-Embedder-Policy: require-corp
+> ```
+
+---
+
+## 実行ファイルのエイリアス
+
+JEBCはリネームすることで、ファイル拡張子を指定せずに特定モードで動作させることができます：
+
+```
+jebc.exe  →  汎用モード（ファイル引数が必要）
+jsbc.exe  →  JavaScriptモード（.jsbc ファイルを自動検索）
+tsbc.exe  →  TypeScriptモード（.tsbc ファイルを自動検索）
+tsxbc.exe →  TSXモード（.tsxbc ファイルを自動検索）
+```
+
+これは実行時に `argv[0]` から検出されるため、再コンパイルは不要です。
+
+---
+
+## アーキテクチャリファレンス
+
+### ソースコード構成（`jebc.cpp`）
+
+| セクション | 関数 | 説明 |
+|-----------|------|------|
+| 文字列ユーティリティ | `toLower` | 大文字小文字変換 |
+| パスユーティリティ | `isSlash` 〜 `absolutePath` | Win32 パス操作 |
+| ファイルシステム操作 | `pathExists` 〜 `listCurrentRegularFiles` | ファイル/ディレクトリの判定・一覧 |
+| ファイルI/O | `readFileText`、`writeFileText` | バイナリモードでのファイル読み書き |
+| コマンドヘルパー | `checkCommandAvailable`、`runCommandWithCapturedStderr` | 外部ツールの実行 |
+| コードマスク | `buildCodeMask` | コメント・文字列リテラルの検出 |
+| ブロック抽出 | `extractBlock` | 波括弧マッチのブロックパーサー |
+| セクションパーサー | `parseSections` | `lang.X { }` ブロックの抽出 |
+| コード生成 | `makeGlueCode`、`makeMinimalIndexHtml` | テンプレート生成 |
+| モード検出 | `detectModeByArgv0`、`detectModeByExt` | ビルドモードの解決 |
+| モードヘルパー | `modeToScriptKind`、`modeToEntryName`、`findInputByMode` | モード ↔ 文字列の変換 |
+| メイン | `main` | パイプライン全体のオーケストレーション |
+
+### パーサーの詳細
+
+パーサーは以下を正しく処理します：
+- **単一行コメント**（`//`）
+- **ブロックコメント**（`/* */`）
+- **シングルクォート文字列**（`'...'`）
+- **ダブルクォート文字列**（`"..."`）
+- **テンプレートリテラル**（`` ` `` ... `` ` ``）
+- **エスケープシーケンス**（`\\`）— すべての文字列型内で対応
+- **ネストした波括弧** — 深度追跡で正確にマッチ
+
+---
+
+## エラーリファレンス
+
+| エラーメッセージ | 原因 | 対処法 |
+|----------------|------|--------|
+| `Unsupported file extension` | 入力ファイルの拡張子が未対応 | `.jsbc`、`.tsbc`、`.tsxbc` を使用する |
+| `Input file not specified` | ファイル引数なし、かつ自動検出で0個または2個以上見つかった | 明示的にパスを指定するか、対応ファイルを1つだけにする |
+| `Failed to open input file` | ファイルが存在しないか読み取り不可 | ファイルパスを確認する |
+| `No lang.c { ... } section found` | 入力ファイルにCコードブロックがない | `lang.c { }` セクションを追加する |
+| `No lang.X { ... } section found` | モードに対応するスクリプトブロックがない | 適切な `lang.js/ts/tsx { }` セクションを追加する |
+| `emcc was not found in PATH` | Emscripten が未インストールまたは未起動 | `emsdk activate` を実行し、`emcc` が PATH にあることを確認 |
+| `esbuild was not found in PATH` | esbuild が未インストール | `npm i -g esbuild` を実行する |
+| `emcc build failed` | Cコードのコンパイルエラー | `lang.c` ブロックのCコードを確認。詳細は `.bc_build/emcc.stderr.log` を参照 |
+| `esbuild bundle failed` | JS/TS のバンドルエラー | スクリプトコードを確認。詳細は `.bc_build/esbuild.stderr.log` を参照 |
+| `Failed to create build directories` | 権限またはディスクのエラー | 書き込み権限を確認する |
+
+---
+
+## サンプルコード集
+
+### 最小サンプル（JavaScript）
+
+**`hello.jsbc`**
+```
+lang.c {
+extern "C" {
+    int multiply(int a, int b) {
+        return a * b;
+    }
+}
+}
+
+lang.js {
+const result = native.multiply(6, 7);
+document.body.innerHTML = `<h1>6 × 7 = ${result}</h1>`;
+}
+```
+
+```batch
+jebc hello.jsbc
+:: 出力 → dist/native.wasm, dist/bundle.js, dist/index.html
+```
+
+### TSXサンプル（DOM操作）
+
+**`app.tsxbc`**
+```
+lang.c {
+extern "C" {
+    int fibonacci(int n) {
+        if (n <= 1) return n;
+        int a = 0, b = 1;
+        for (int i = 2; i <= n; i++) {
+            int tmp = a + b;
+            a = b;
+            b = tmp;
+        }
+        return b;
+    }
+}
+}
+
+lang.tsx {
+const container = document.createElement('div');
+for (let i = 0; i < 10; i++) {
+    const el = document.createElement('p');
+    el.textContent = `fib(${i}) = ${native.fibonacci(i)}`;
+    container.appendChild(el);
+}
+document.body.appendChild(container);
+}
+```
+
+```batch
+jebc app.tsxbc
+```
+
+### 複数ブロックの例
+
+同じ言語の `lang` ブロックが複数ある場合、出現順に連結されます：
+
+```
+lang.c {
+extern "C" {
+    int add(int a, int b) { return a + b; }
+}
+}
+
+lang.c {
+extern "C" {
+    int sub(int a, int b) { return a - b; }
+}
+}
+
+lang.js {
+console.log("add:", native.add(10, 5));
+}
+
+lang.js {
+console.log("sub:", native.sub(10, 5));
+}
+```
+
+---
+
+> **JEBC** — CとJSを一つのファイルに。Webへ出荷。
