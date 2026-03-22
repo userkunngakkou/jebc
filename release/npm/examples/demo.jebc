@@ -1,0 +1,22 @@
+call "math.jebc"
+
+lang.c {
+extern "C" {
+    int add(int a, int b) { return a + b; }
+}
+}
+
+lang.css {
+  body { background: #0f0f23; color: #ccc; font-family: monospace; padding: 2rem; }
+  h1 { color: #00cc96; }
+  pre { background: #1a1a2e; padding: 1.5rem; border-radius: 8px; border: 1px solid #333; }
+}
+
+lang.html {
+  <h1>JEBC V2 Demo</h1>
+  <pre id="output">Loading WASM...</pre>
+}
+
+lang.js {
+document.getElementById('output').textContent = 'add(21, 21) = ' + native.add(21, 21);
+}

@@ -1,3 +1,22 @@
-emsdk/ 
-.bc_build/ 
-node_modules/ 
+# Build artifacts
+.bc_build/
+dist/
+*.obj
+*.o
+
+# Dependencies
+emsdk/
+node_modules/
+
+# Test files
+test_*.jebc
+test_*.tsxbc
+test_*.tsbc
+
+# Personal / app-specific
+vpn.tsbc
+wrangler.json
+
+# OS
+Thumbs.db
+.DS_Store
