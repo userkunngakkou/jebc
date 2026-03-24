@@ -1,0 +1,14 @@
+call "math_helper.jelll"
+
+lang.c {
+extern "C" {
+    int cube(int x) { return x * x * x; }
+}
+}
+
+lang.js {
+var sq = native.helper_square(7);
+var cb = native.cube(3);
+document.body.textContent = 'square(7)=' + sq + ' cube(3)=' + cb;
+console.log('[TEST] call directive: square(7)=' + sq + ' cube(3)=' + cb);
+}

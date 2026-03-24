@@ -1,0 +1,24 @@
+lang.c {
+extern "C" {
+    int power(int base, int exp) {
+        int result = 1;
+        for (int i = 0; i < exp; i++) result *= base;
+        return result;
+    }
+}
+}
+
+lang.js {
+// JS block: define a utility
+var formatResult = function(name, val) {
+    return name + ' = ' + val;
+};
+}
+
+lang.ts {
+// TS block: use the JS utility and C function
+const p1: string = formatResult('power(2,10)', native.power(2, 10));
+const p2: string = formatResult('power(3,5)', native.power(3, 5));
+document.body.innerHTML = `<h2>Mixed Blocks</h2><p>${p1}</p><p>${p2}</p>`;
+console.log('[TEST] Mixed blocks: ' + p1 + ', ' + p2);
+}

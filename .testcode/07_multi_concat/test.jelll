@@ -1,0 +1,37 @@
+lang.c {
+extern "C" {
+    int multi_block_a() { return 100; }
+}
+}
+
+lang.c {
+extern "C" {
+    int multi_block_b() { return 200; }
+}
+}
+
+lang.css {
+.result { color: #4ade80; font-size: 1.2rem; }
+}
+
+lang.css {
+body { background: #1a1a2e; color: white; font-family: sans-serif; padding: 2rem; }
+}
+
+lang.html {
+<h1>Multi Block Test</h1>
+}
+
+lang.html {
+<div class="result" id="out"></div>
+}
+
+lang.js {
+var a = native.multi_block_a();
+}
+
+lang.js {
+var b = native.multi_block_b();
+document.getElementById('out').textContent = 'a=' + a + ' b=' + b + ' sum=' + (a+b);
+console.log('[TEST] Multi concat: a=' + a + ' b=' + b + ' sum=' + (a+b));
+}

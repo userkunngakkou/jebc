@@ -1,0 +1,5 @@
+lang.js {
+import { mySecret } from "./test_mod_a.jelll";
+console.log("Secret from test_mod_a is: " + mySecret());
+console.log("Reload works!");
+}

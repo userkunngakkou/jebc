@@ -1,7 +1,7 @@
-# JEBC — npm package
+# JELLL — npm package
 
-> `npm install -g jebc`
+> `npm install -g jelll`
 
-C++ と JS/TS/TSX を1つの `.jebc` ファイルに書いて `jebc app.jebc` でビルド。
+C++ と JS/TS/TSX を1つの `.jelll` ファイルに書いて `jelll app.jelll` でビルド。
 
-詳細: https://github.com/userkunngakkou/jebc
+詳細: https://github.com/userkunngakkou/jelll

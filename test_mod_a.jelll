@@ -1,0 +1,9 @@
+lang.c {
+    extern "C" { int get_secret() { return 42; } }
+}
+
+lang.ts {
+    export function mySecret() {
+        return native.get_secret();
+    }
+}

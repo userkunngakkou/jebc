@@ -1,0 +1,11 @@
+lang.c {
+extern "C" {
+    int add(int a, int b) { return a + b; }
+    int multiply(int a, int b) { return a * b; }
+}
+}
+
+lang.js {
+document.body.textContent = 'add(2,3) = ' + native.add(2, 3) + ', multiply(4,5) = ' + native.multiply(4, 5);
+console.log('[TEST] Basic C+JS: add(2,3)=' + native.add(2,3) + ' multiply(4,5)=' + native.multiply(4,5));
+}

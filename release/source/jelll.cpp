@@ -1,10 +1,10 @@
 // ==========================================================================
-// JEBC (JavaScript/TypeScript + Emscripten Bundled Compiler) V2
+// JELLL (JavaScript/TypeScript + Emscripten Bundled Compiler) V2
 //
-// Reads .jebc / .jsbc / .tsbc / .tsxbc files, compiles C code to WASM
+// Reads .jelll / .jsbc / .tsbc / .tsxbc files, compiles C code to WASM
 // via emcc, bundles JS/TS/TSX code via esbuild, and outputs dist/.
 // Supports lang.c / lang.js / lang.ts / lang.tsx / lang.css / lang.html
-// blocks, file inclusion via 'call', and @jebc-sync.
+// blocks, file inclusion via 'call', and @jelll-sync.
 //
 // Required external tools: emcc (Emscripten), esbuild
 // Target platform: Windows (uses Win32 API)
@@ -49,7 +49,7 @@ struct Section {
 };
 
 // ==========================================================================
-// @jebc-sync data structures
+// @jelll-sync data structures
 // ==========================================================================
 
 struct SyncField {
@@ -272,14 +272,14 @@ static int runCommandWithCapturedStderr(const std::string& label, const std::str
     std::ofstream clearFile(stderrPath, std::ios::trunc);
     clearFile.close();
     std::string wrapped = cmd + " 2>\"" + stderrPath + "\"";
-    std::cout << "[JEBC] " << label << std::endl;
+    std::cout << "[JELLL] " << label << std::endl;
     int rc = std::system(wrapped.c_str());
     if (rc != 0) {
         std::string errText;
         if (readFileText(stderrPath, errText) && !errText.empty()) {
             std::cerr << errText << std::endl;
         }
-        std::cerr << "[JEBC] command failed: " << cmd << std::endl;
+        std::cerr << "[JELLL] command failed: " << cmd << std::endl;
     }
     return rc;
 }
@@ -489,13 +489,13 @@ static bool extractBlock(const std::string& src, std::size_t openBracePos, std::
 /// Matches inside comments or string literals are excluded via the code mask.
 static std::vector<Section> parseSections(const std::string& text) {
     std::vector<Section> sections;
-    std::regex rx(R"(\blang(?:[.\s]*)(c|js|ts|tsx|rs|zig)\s*\{)");
+    std::regex rx(R"(\blang(?:[.\s]*)(css|html|tsx|ts|js|rs|zig|c)\s*\{)");
     std::vector<bool> codeMask = buildCodeMask(text);
     std::size_t searchPos = 0;
     while (searchPos < text.size()) {
         std::smatch m;
-        std::string tail = text.substr(searchPos);
-        if (!std::regex_search(tail, m, rx)) {
+        auto searchStart = text.cbegin() + static_cast<std::ptrdiff_t>(searchPos);
+        if (!std::regex_search(searchStart, text.cend(), m, rx)) {
             break;
         }
         std::size_t matchAbs = searchPos + static_cast<std::size_t>(m.position(0));
@@ -524,7 +524,7 @@ static std::vector<Section> parseSections(const std::string& text) {
 }
 
 // ==========================================================================
-// @jebc-sync - struct parsing and code generation
+// @jelll-sync - struct parsing and code generation
 // ==========================================================================
 
 static std::string cTypeToTSType(const std::string& cType) {
@@ -534,7 +534,7 @@ static std::string cTypeToTSType(const std::string& cType) {
 
 static std::vector<SyncStruct> parseSyncStructs(const std::string& cCode) {
     std::vector<SyncStruct> result;
-    std::string marker = "@jebc-sync";
+    std::string marker = "@jelll-sync";
     std::size_t pos = 0;
 
     while ((pos = cCode.find(marker, pos)) != std::string::npos) {
@@ -679,29 +679,29 @@ static void detectSyncMethods(const std::string& cCode, std::vector<SyncStruct>&
 
 static std::string generateSyncCCode(const std::vector<SyncStruct>& syncs) {
     std::ostringstream out;
-    out << "\n// JEBC @jebc-sync: auto-generated code\n";
+    out << "\n// JELLL @jelll-sync: auto-generated code\n";
 
     for (const auto& ss : syncs) {
-        out << "static " << ss.name << " __jebc_" << ss.name << "_pool[256];\n";
-        out << "static int __jebc_" << ss.name << "_count = 0;\n\n";
+        out << "static " << ss.name << " __jelll_" << ss.name << "_pool[256];\n";
+        out << "static int __jelll_" << ss.name << "_count = 0;\n\n";
         out << "extern \"C\" {\n";
-        out << "    int __jebc_" << ss.name << "_new() { return __jebc_" << ss.name << "_count++; }\n\n";
+        out << "    int __jelll_" << ss.name << "_new() { return __jelll_" << ss.name << "_count++; }\n\n";
 
         for (const auto& f : ss.fields) {
-            out << "    " << f.cType << " __jebc_" << ss.name << "_get_" << f.name << "(int id) {\n";
-            out << "        return __jebc_" << ss.name << "_pool[id]." << f.name << ";\n    }\n";
-            out << "    void __jebc_" << ss.name << "_set_" << f.name << "(int id, " << f.cType << " v) {\n";
-            out << "        __jebc_" << ss.name << "_pool[id]." << f.name << " = v;\n    }\n\n";
+            out << "    " << f.cType << " __jelll_" << ss.name << "_get_" << f.name << "(int id) {\n";
+            out << "        return __jelll_" << ss.name << "_pool[id]." << f.name << ";\n    }\n";
+            out << "    void __jelll_" << ss.name << "_set_" << f.name << "(int id, " << f.cType << " v) {\n";
+            out << "        __jelll_" << ss.name << "_pool[id]." << f.name << " = v;\n    }\n\n";
         }
 
         for (const auto& m : ss.methods) {
-            out << "    " << m.returnType << " __jebc_" << ss.name << "_call_" << m.methodName << "(int id";
+            out << "    " << m.returnType << " __jelll_" << ss.name << "_call_" << m.methodName << "(int id";
             for (const auto& p : m.extraParams) {
                 out << ", " << p.first << " " << p.second;
             }
             out << ") {\n        ";
             if (m.returnType != "void") out << "return ";
-            out << m.fullName << "(&__jebc_" << ss.name << "_pool[id]";
+            out << m.fullName << "(&__jelll_" << ss.name << "_pool[id]";
             for (const auto& p : m.extraParams) {
                 out << ", " << p.second;
             }
@@ -716,17 +716,17 @@ static std::string generateSyncCCode(const std::vector<SyncStruct>& syncs) {
 
 static std::string generateSyncTSCode(const std::vector<SyncStruct>& syncs) {
     std::ostringstream out;
-    out << "// JEBC @jebc-sync: auto-generated classes\n\n";
+    out << "// JELLL @jelll-sync: auto-generated classes\n\n";
 
     for (const auto& ss : syncs) {
         out << "globalThis." << ss.name << " = class " << ss.name << " {\n";
         out << "  __id;\n";
-        out << "  constructor() { this.__id = native.__jebc_" << ss.name << "_new(); }\n";
+        out << "  constructor() { this.__id = native.__jelll_" << ss.name << "_new(); }\n";
         out << "  get id() { return this.__id; }\n\n";
 
         for (const auto& f : ss.fields) {
-            out << "  get " << f.name << "() { return native.__jebc_" << ss.name << "_get_" << f.name << "(this.__id); }\n";
-            out << "  set " << f.name << "(v) { native.__jebc_" << ss.name << "_set_" << f.name << "(this.__id, v); }\n\n";
+            out << "  get " << f.name << "() { return native.__jelll_" << ss.name << "_get_" << f.name << "(this.__id); }\n";
+            out << "  set " << f.name << "(v) { native.__jelll_" << ss.name << "_set_" << f.name << "(this.__id, v); }\n\n";
         }
 
         for (const auto& m : ss.methods) {
@@ -737,7 +737,7 @@ static std::string generateSyncTSCode(const std::vector<SyncStruct>& syncs) {
             }
             out << ") {\n    ";
             if (m.returnType != "void") out << "return ";
-            out << "native.__jebc_" << ss.name << "_call_" << m.methodName << "(this.__id";
+            out << "native.__jelll_" << ss.name << "_call_" << m.methodName << "(this.__id";
             for (const auto& p : m.extraParams) {
                 out << ", " << p.second;
             }
@@ -760,25 +760,25 @@ static std::string generateWasmInitCode() {
     return R"(const native = {};
 const sharedBuffer = new SharedArrayBuffer(16 * 1024 * 1024);
 const sharedMemory = new WebAssembly.Memory({ initial: 256, maximum: 256, shared: true });
-const __jebcImports = {
+const __jelllImports = {
   env: {
     memory: sharedMemory,
     sharedBuffer
   }
 };
-const __jebcWasmUrl = new URL('./native.wasm', import.meta.url);
-const __jebcWasmResponse = await fetch(__jebcWasmUrl);
-if (!__jebcWasmResponse.ok) {
-  throw new Error(`native.wasm load failed: ${__jebcWasmResponse.status}`);
+const __jelllWasmUrl = new URL('./native.wasm', import.meta.url);
+const __jelllWasmResponse = await fetch(__jelllWasmUrl);
+if (!__jelllWasmResponse.ok) {
+  throw new Error(`native.wasm load failed: ${__jelllWasmResponse.status}`);
 }
-let __jebcWasm;
+let __jelllWasm;
 try {
-  __jebcWasm = await WebAssembly.instantiateStreaming(Promise.resolve(__jebcWasmResponse), __jebcImports);
+  __jelllWasm = await WebAssembly.instantiateStreaming(Promise.resolve(__jelllWasmResponse), __jelllImports);
 } catch (e) {
-  const __jebcBytes = await __jebcWasmResponse.arrayBuffer();
-  __jebcWasm = await WebAssembly.instantiate(__jebcBytes, __jebcImports);
+  const __jelllBytes = await __jelllWasmResponse.arrayBuffer();
+  __jelllWasm = await WebAssembly.instantiate(__jelllBytes, __jelllImports);
 }
-Object.assign(native, __jebcWasm.instance.exports);
+Object.assign(native, __jelllWasm.instance.exports);
 globalThis.native = native;
 globalThis.sharedBuffer = sharedBuffer;
 globalThis.sharedMemory = sharedMemory;
@@ -791,7 +791,7 @@ static std::string makeIndexHtml(const std::string& cssCode, const std::string& 
     out << "<!doctype html>\n<html lang=\"en\">\n<head>\n";
     out << "  <meta charset=\"UTF-8\" />\n";
     out << "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n";
-    out << "  <title>JEBC Output</title>\n";
+    out << "  <title>JELLL Output</title>\n";
     if (!cssCode.empty()) {
         out << "  <style>\n" << cssCode << "\n  </style>\n";
     }
@@ -842,7 +842,7 @@ static bool detectModeByExt(const std::string& input, Mode& mode) {
         mode = MODE_TSX;
         return true;
     }
-    if (ext == ".jebc") {
+    if (ext == ".jelll") {
         mode = MODE_AUTO;
         return true;
     }
@@ -879,7 +879,7 @@ static std::string findInputByMode(Mode mode) {
     std::size_t count = 0;
     for (const auto& name : listCurrentRegularFiles()) {
         std::string ext = toLower(extensionOf(name));
-        if (ext == wantedExt || ext == ".jebc") {
+        if (ext == wantedExt || ext == ".jelll") {
             found = name;
             ++count;
         }
@@ -902,8 +902,8 @@ static std::string processImports(
     int& modCounter) 
 {
     std::string result;
-    // Match: import ... from "path.jebc" or import "path.jebc"
-    std::regex importRegex(R"((import\s+(?:.*?\s+from\s+)?['"])([^'"]+\.jebc)(['"]))");
+    // Match: import ... from "path.jelll" or import "path.jelll"
+    std::regex importRegex(R"((import\s+(?:.*?\s+from\s+)?['"])([^'"]+\.jelll)(['"]))");
     
     std::sregex_iterator words_begin(scriptCode.begin(), scriptCode.end(), importRegex);
     std::sregex_iterator words_end;
@@ -977,19 +977,24 @@ static std::string preprocessCalls(const std::string& source, const std::string&
             callPath = absolutePath(callPath);
 
             // Circular reference check
+            bool isCircular = false;
             for (const auto& v : visited) {
                 if (v == callPath) {
-                    std::cerr << "[JEBC] Circular call detected: " << callPath << std::endl;
-                    result << "// [JEBC ERROR] Circular call: " << relPath << "\n";
-                    continue;
+                    std::cerr << "[JELLL] Circular call detected: " << callPath << std::endl;
+                    result << "// [JELLL ERROR] Circular call: " << relPath << "\n";
+                    isCircular = true;
+                    break;
                 }
+            }
+            if (isCircular) {
+                continue;
             }
 
             // Read and recursively process
             std::string callSource;
             if (!readFileText(callPath, callSource)) {
-                std::cerr << "[JEBC] Failed to read call target: " << callPath << std::endl;
-                result << "// [JEBC ERROR] File not found: " << relPath << "\n";
+                std::cerr << "[JELLL] Failed to read call target: " << callPath << std::endl;
+                result << "// [JELLL ERROR] File not found: " << relPath << "\n";
                 continue;
             }
 
@@ -1015,7 +1020,7 @@ static bool runBuild(const std::string& inputFile, Mode mode) {
     std::string distDir = "dist";
     if (!ensureDirectory(bcDir) || !ensureDirectory(distDir)) {
         std::cerr << "Failed to create build directories." << std::endl;
-        return 1;
+        return false;
     }
 
     // --- Process all modules ---
@@ -1034,9 +1039,9 @@ static bool runBuild(const std::string& inputFile, Mode mode) {
     std::string globalZigCode;
     std::unordered_set<std::string> processedSet;
 
-    while (!pendingFiles.empty()) {
-        std::string currAbs = pendingFiles.front();
-        pendingFiles.erase(pendingFiles.begin());
+    std::size_t queueIdx = 0;
+    while (queueIdx < pendingFiles.size()) {
+        std::string currAbs = pendingFiles[queueIdx++];
         
         if (processedSet.count(currAbs)) continue;
         processedSet.insert(currAbs);
@@ -1056,11 +1061,11 @@ static bool runBuild(const std::string& inputFile, Mode mode) {
             blocksByKind[sec.kind] += sec.body + "\n";
         }
         
-        globalCCode += blocksByKind["c"] + "\n";
-        globalCssCode += blocksByKind["css"] + "\n";
-        globalHtmlCode += blocksByKind["html"] + "\n";
-        globalRsCode += blocksByKind["rs"] + "\n";
-        globalZigCode += blocksByKind["zig"] + "\n";
+        if (!blocksByKind["c"].empty())    globalCCode    += blocksByKind["c"] + "\n";
+        if (!blocksByKind["css"].empty())  globalCssCode  += blocksByKind["css"] + "\n";
+        if (!blocksByKind["html"].empty()) globalHtmlCode += blocksByKind["html"] + "\n";
+        if (!blocksByKind["rs"].empty())   globalRsCode   += blocksByKind["rs"] + "\n";
+        if (!blocksByKind["zig"].empty())  globalZigCode  += blocksByKind["zig"] + "\n";
         
         std::string scriptCode;
         if (mode == MODE_AUTO) {
@@ -1095,14 +1100,14 @@ static bool runBuild(const std::string& inputFile, Mode mode) {
         return 1;
     }
     
-    // --- @jebc-sync: inject synchronized struct code ---
+    // --- @jelll-sync: inject synchronized struct code ---
     auto syncStructs = parseSyncStructs(globalCCode);
     std::string syncTS;
     if (!syncStructs.empty()) {
         detectSyncMethods(globalCCode, syncStructs);
         globalCCode += "\n" + generateSyncCCode(syncStructs);
         syncTS = generateSyncTSCode(syncStructs);
-        std::cout << "[JEBC] Sync: " << syncStructs.size() << " struct(s) synchronized globally" << std::endl;
+        std::cout << "[JELLL] Sync: " << syncStructs.size() << " struct(s) synchronized globally" << std::endl;
     }
 
     // --- Generate WASM setup code (wasm_init.tsx) ---
@@ -1180,7 +1185,7 @@ static bool runBuild(const std::string& inputFile, Mode mode) {
     emccCmd += " -O3 -s WASM=1 -s SIDE_MODULE=1 --no-entry -o \"" + wasmOut + "\"";
     int emccRc = runCommandWithCapturedStderr("Linking WebAssembly...", emccCmd, stderrEmcc);
     if (emccRc != 0) {
-        std::cerr << "[JEBC] emcc build failed with exit code: " << emccRc << std::endl;
+        std::cerr << "[JELLL] emcc build failed with exit code: " << emccRc << std::endl;
         return false;
     }
 
@@ -1189,7 +1194,7 @@ static bool runBuild(const std::string& inputFile, Mode mode) {
         "esbuild \"" + entryPath + "\" --bundle --minify --format=esm --outfile=\"" + bundleOut + "\"";
     int esbuildRc = runCommandWithCapturedStderr("Bundling JS/TS...", esbuildCmd, stderrEsbuild);
     if (esbuildRc != 0) {
-        std::cerr << "[JEBC] esbuild bundle failed with exit code: " << esbuildRc << std::endl;
+        std::cerr << "[JELLL] esbuild bundle failed with exit code: " << esbuildRc << std::endl;
         return false;
     }
 
@@ -1197,14 +1202,14 @@ static bool runBuild(const std::string& inputFile, Mode mode) {
     {
         std::string htmlContent = makeIndexHtml(globalCssCode, globalHtmlCode);
         if (!writeFileText(indexOut, htmlContent)) {
-            std::cerr << "[JEBC] Failed to write: " << indexOut << std::endl;
+            std::cerr << "[JELLL] Failed to write: " << indexOut << std::endl;
             return false;
         }
     }
 
     // --- Done ---
-    std::cout << "[JEBC] Build complete: " << wasmOut << " and " << bundleOut << std::endl;
-    std::cout << "[JEBC] dist: " << absolutePath(distDir) << std::endl;
+    std::cout << "[JELLL] Build complete: " << wasmOut << " and " << bundleOut << std::endl;
+    std::cout << "[JELLL] dist: " << absolutePath(distDir) << std::endl;
     return true;
 }
 
@@ -1218,6 +1223,35 @@ int main(int argc, char* argv[]) {
     Mode mode = MODE_AUTO;
     int argIdx = 1;
 
+    if (argc > argIdx) {
+        std::string firstArg = argv[argIdx];
+        if (firstArg == "setup" || firstArg == "--setup") {
+            char selfPath[MAX_PATH];
+            DWORD pathLen = GetModuleFileNameA(NULL, selfPath, MAX_PATH);
+            if (pathLen == 0 || pathLen >= MAX_PATH) {
+                std::cerr << "[JELLL] Failed to determine executable path." << std::endl;
+                return 1;
+            }
+            std::string exeDir = parentPath(std::string(selfPath, pathLen));
+            
+            std::string scriptPath = joinPath(exeDir, "scripts\\postinstall.js");
+            if (fs::exists(scriptPath)) {
+                std::cout << "[JELLL] Launching environment setup..." << std::endl;
+                std::string cmd = "node \"" + scriptPath + "\" --interactive";
+                std::system(cmd.c_str());
+                return 0;
+            }
+            
+            std::string batchPath = joinPath(exeDir, "setup.bat");
+            if (fs::exists(batchPath)) {
+                std::system(batchPath.c_str());
+                return 0;
+            }
+            std::cerr << "[JELLL] Setup script or batch file not found at: " << exeDir << std::endl;
+            return 1;
+        }
+    }
+
     if (argc > argIdx && (std::string(argv[argIdx]) == "dev" || std::string(argv[argIdx]) == "--watch")) {
         isDev = true;
         argIdx++;
@@ -1229,7 +1263,7 @@ int main(int argc, char* argv[]) {
         if (detectModeByExt(inputFile, extMode)) {
             mode = extMode;
         } else if (!detectModeByArgv0(argv[0], mode)) {
-            std::cerr << "Unsupported file extension. Use .jebc, .jsbc, .tsbc, or .tsxbc" << std::endl;
+            std::cerr << "Unsupported file extension. Use .jelll, .jsbc, .tsbc, or .tsxbc" << std::endl;
             return 1;
         }
     } else {
@@ -1241,7 +1275,7 @@ int main(int argc, char* argv[]) {
             mode = MODE_AUTO;
         }
         if (inputFile.empty()) {
-            std::cerr << "Usage: jebc [dev] <filename.jebc>" << std::endl;
+            std::cerr << "Usage: jelll [dev] <filename.jelll>" << std::endl;
             return 1;
         }
     }
@@ -1250,16 +1284,16 @@ int main(int argc, char* argv[]) {
         return runBuild(inputFile, mode) ? 0 : 1;
     }
 
-    std::cout << "[JEBC] Starting Development Mode..." << std::endl;
+    std::cout << "[JELLL] Starting Development Mode..." << std::endl;
     if (!runBuild(inputFile, mode)) {
-        std::cerr << "[JEBC] Initial build failed, but watching for changes..." << std::endl;
+        std::cerr << "[JELLL] Initial build failed, but watching for changes..." << std::endl;
     }
 
-    std::cout << "[JEBC] Starting local server..." << std::endl;
+    std::cout << "[JELLL] Starting local server..." << std::endl;
     // Detached background esbuild server
     std::system("start /B cmd /c \"esbuild --servedir=dist >nul 2>nul\"");
-    std::cout << "[JEBC] Dev server running at http://127.0.0.1:8000" << std::endl;
-    std::cout << "[JEBC] Watching for file changes... (Press Ctrl+C to stop)" << std::endl;
+    std::cout << "[JELLL] Dev server running at http://127.0.0.1:8000" << std::endl;
+    std::cout << "[JELLL] Watching for file changes... (Press Ctrl+C to stop)" << std::endl;
 
     // Save initial timestamps
     std::unordered_map<std::string, fs::file_time_type> lastWriteTimes;
@@ -1268,7 +1302,7 @@ int main(int argc, char* argv[]) {
         for (auto& p : fs::recursive_directory_iterator(".")) {
             if (p.is_regular_file()) {
                 std::string ext = toLower(p.path().extension().string());
-                if (ext == ".jebc" || ext == ".jsbc" || ext == ".tsbc" || ext == ".tsxbc") {
+                if (ext == ".jelll" || ext == ".jsbc" || ext == ".tsbc" || ext == ".tsxbc") {
                     auto pathStr = p.path().string();
                     auto wt = fs::last_write_time(p);
                     if (lastWriteTimes.find(pathStr) == lastWriteTimes.end() || lastWriteTimes[pathStr] != wt) {
@@ -1286,7 +1320,7 @@ int main(int argc, char* argv[]) {
     while (true) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         if (updateTimestamps()) {
-            std::cout << "\n[JEBC] File change detected! Rebuilding..." << std::endl;
+            std::cout << "\n[JELLL] File change detected! Rebuilding..." << std::endl;
             runBuild(inputFile, mode);
         }
     }

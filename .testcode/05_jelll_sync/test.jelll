@@ -1,0 +1,35 @@
+lang.c {
+#include <math.h>
+
+// @jelll-sync
+struct Vec2 {
+    float x;
+    float y;
+};
+
+extern "C" {
+    float Vec2_length(Vec2* self) {
+        return sqrtf(self->x * self->x + self->y * self->y);
+    }
+    void Vec2_scale(Vec2* self, float factor) {
+        self->x *= factor;
+        self->y *= factor;
+    }
+}
+}
+
+lang.ts {
+const v = new Vec2();
+v.x = 3.0;
+v.y = 4.0;
+const len = v.length();
+
+v.scale(2.0);
+
+document.body.innerHTML = `
+<h2>@jelll-sync Test</h2>
+<p>Vec2(3,4).length() = ${len}</p>
+<p>After scale(2): x=${v.x}, y=${v.y}</p>
+`;
+console.log('[TEST] @jelll-sync: length=' + len + ' scaled x=' + v.x + ' y=' + v.y);
+}

@@ -1,0 +1,13 @@
+lang.c {
+extern "C" {
+    int subtract(int a, int b) { return a - b; }
+    double divide(double a, double b) { return a / b; }
+}
+}
+
+lang.ts {
+const result1: number = native.subtract(10, 3);
+const result2: number = native.divide(22.0, 7.0);
+document.body.innerHTML = `<h1>TypeScript Test</h1><p>subtract(10,3) = ${result1}</p><p>divide(22,7) = ${result2.toFixed(4)}</p>`;
+console.log('[TEST] C+TS: subtract(10,3)=' + result1 + ' divide(22,7)=' + result2.toFixed(4));
+}

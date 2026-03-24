@@ -1,4 +1,4 @@
-call "math.jebc"
+call "math.jelll"
 
 lang.c {
 extern "C" {
@@ -13,7 +13,7 @@ lang.css {
 }
 
 lang.html {
-  <h1>JEBC V2 Demo</h1>
+  <h1>JELLL V2 Demo</h1>
   <pre id="output">Loading WASM...</pre>
 }
 

@@ -3,7 +3,7 @@ lang.c {
 
 extern "C" {
     // 🛡️ [WASM/Client] GFWのDPI検知を回避するためのXOR難読化処理
-    // JEBCの仕様通り sharedBuffer を直接操作して高速化
+    // JELLLの仕様通り sharedBuffer を直接操作して高速化
     void xor_cipher(uint8_t* buffer, int length, uint8_t key) {
         for (int i = 0; i < length; i++) {
             buffer[i] ^= key;
@@ -19,7 +19,7 @@ const XOR_KEY = 0x88;
 // =========================================================
 // ☁️ [Server] Cloudflare Workers 用のエントリポイント
 // =========================================================
-// JEBC (esbuild) は ESM で出力するため、export default がそのままWorkerの起点になります
+// JELLL (esbuild) は ESM で出力するため、export default がそのままWorkerの起点になります
 export default {
     async fetch(request: Request, env: any, ctx: any) {
         // WebSocketのアップグレードリクエスト（VPN通信）を処理
@@ -70,7 +70,7 @@ lang.ts {
 // =========================================================
 // Worker環境(サーバー)では window が存在しないため、このブロックはブラウザでのみ実行されます
 if (typeof window !== "undefined") {
-    // JEBCが提供するグローバル変数を利用
+    // JELLLが提供するグローバル変数を利用
     const memoryView = new Uint8Array(sharedBuffer);
     const WS_URL = location.protocol === "https:" ? `wss://${location.host}/` : `ws://${location.host}/`;
     
@@ -80,7 +80,7 @@ if (typeof window !== "undefined") {
     const container = document.createElement("div");
     container.innerHTML = `
         <div style="font-family: sans-serif; padding: 20px;">
-            <h2>🔐 JEBC Web VPN Portal (GFW Bypass)</h2>
+            <h2>🔐 JELLL Web VPN Portal (GFW Bypass)</h2>
             <input id="urlInput" type="text" value="https://ja.wikipedia.org/" style="width: 400px; padding: 5px;" />
             <button id="fetchBtn" style="padding: 5px 10px;">Connect & Fetch</button>
             <hr />

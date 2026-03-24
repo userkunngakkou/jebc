@@ -1,0 +1,38 @@
+lang.c {
+extern "C" {
+    int get_magic_number() { return 42; }
+}
+}
+
+lang.css {
+body {
+    background: #0f0f23;
+    color: #eee;
+    font-family: 'Segoe UI', monospace;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+.card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 2rem 3rem;
+    text-align: center;
+}
+h1 { color: #7dd3fc; }
+}
+
+lang.html {
+<div class="card">
+    <h1>CSS + HTML Block Test</h1>
+    <p id="result">Loading...</p>
+</div>
+}
+
+lang.js {
+document.getElementById('result').textContent = 'Magic Number = ' + native.get_magic_number();
+console.log('[TEST] CSS+HTML blocks: magic=' + native.get_magic_number());
+}

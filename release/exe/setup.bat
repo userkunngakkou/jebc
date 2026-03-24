@@ -2,20 +2,20 @@
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo   JEBC - Standalone Setup
+echo   JELLL - Standalone Setup
 echo ============================================
 echo.
 
-echo [JEBC] Checking esbuild...
+echo [JELLL] Checking esbuild...
 call npm list -g esbuild >nul 2>nul
 if !ERRORLEVEL! neq 0 (
-    echo [JEBC] Installing esbuild globally...
+    echo [JELLL] Installing esbuild globally...
     call npm install -g esbuild
 ) else (
     echo [OK] esbuild already installed.
 )
 
-echo [JEBC] Checking Emscripten...
+echo [JELLL] Checking Emscripten...
 where emcc >nul 2>nul
 if !ERRORLEVEL! neq 0 (
     where git >nul 2>nul
@@ -38,7 +38,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo.
-echo   Done! You can now use: jebc your_app.jebc
+echo   Done! You can now use: jelll your_app.jelll
 echo.
 
 endlocal

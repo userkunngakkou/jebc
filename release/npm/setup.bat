@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-echo [JEBC] Emscripten Setup
+echo [JELLL] Emscripten Setup
 where emcc >nul 2>nul
 if !ERRORLEVEL! neq 0 (
     where git >nul 2>nul

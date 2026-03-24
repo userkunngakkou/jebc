@@ -36,19 +36,19 @@ echo C++20 compiler not found. Install MSVC Build Tools or MinGW g++.
 exit /b 1
 
 :BUILD_MSVC
-  echo [JEBC] Building with MSVC...
-  cl /std:c++20 /EHsc /O2 /Fe:jebc.exe jebc.cpp
+  echo [JELLL] Building with MSVC...
+  cl /std:c++20 /utf-8 /EHsc /O2 /Fe:jelll.exe jelll.cpp
 if %ERRORLEVEL% neq 0 exit /b 1
 goto BUILD_OK
 
 :BUILD_GPP
-echo [JEBC] Building with MinGW g++...
-g++ -std=c++20 -O2 -o jebc.exe jebc.cpp
+echo [JELLL] Building with MinGW g++...
+g++ -std=c++20 -O2 -o jelll.exe jelll.cpp
 if %ERRORLEVEL%==0 goto BUILD_OK
-echo [JEBC] Retrying with -lstdc++fs...
-g++ -std=c++20 -O2 -o jebc.exe jebc.cpp -lstdc++fs
+echo [JELLL] Retrying with -lstdc++fs...
+g++ -std=c++20 -O2 -o jelll.exe jelll.cpp -lstdc++fs
 if %ERRORLEVEL% neq 0 exit /b 1
 
 :BUILD_OK
-echo jebc.exe build succeeded
+echo jelll.exe build succeeded
 exit /b 0

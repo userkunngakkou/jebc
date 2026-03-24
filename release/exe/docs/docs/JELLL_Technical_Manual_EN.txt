@@ -1,0 +1,386 @@
+# JELLL V5 Technical Manual
+
+> JELLL — JavaScript/TypeScript + Emscripten Bundled Compiler
+> Version 5.0 | Platform: Windows
+
+---
+
+## Table of Contents
+
+1. Overview
+2. Requirements
+3. Installation & Setup
+4. Input File Format (.jelll)
+5. Language Blocks
+6. File Inclusion (call directive)
+7. @jelll-sync (Struct Synchronization)
+8. Development Mode (jelll dev)
+9. Build Pipeline
+10. Output Structure
+11. WASM Runtime API
+12. CLI Reference
+13. Error Reference
+14. Examples
+
+---
+
+## 1. Overview
+
+JELLL is a single-command build tool that compiles C/C++, Rust, and Zig
+alongside JS/TS/TSX from a unified `.jelll` source file into a deployable
+web application with WebAssembly.
+
+Key features across versions:
+- V2: Unified `.jelll` extension, mixed JS/TS/TSX, `call` directive,
+  `lang.css`/`lang.html`, `@jelll-sync`
+- V4: `lang.rs` (Rust) and `lang.zig` (Zig) support, `jelll dev` live
+  reload server, fully automated toolchain installer
+- V5: Interactive multi-select setup UI, stable release
+
+---
+
+## 2. Requirements
+
+| Tool               | Purpose                    | Install                          |
+|---------------------|---------------------------|----------------------------------|
+| Node.js + npm       | Install JELLL & esbuild    | https://nodejs.org/              |
+| Emscripten (emcc)   | C/C++ -> WASM             | Auto-installed via `jelll --setup`|
+| esbuild             | JS/TS bundling            | Auto-installed via npm           |
+| Rust (rustc/rustup) | Rust -> WASM (optional)   | Auto-installed via `jelll --setup`|
+| Zig                 | Zig -> WASM (optional)    | Auto-installed via `jelll --setup`|
+
+---
+
+## 3. Installation & Setup
+
+### Via npm (recommended)
+
+    npm install -g jelll
+
+This installs the `jelll` command globally and auto-installs esbuild.
+
+### Toolchain Setup
+
+After installation, run the interactive setup to install compilers:
+
+    jelll --setup
+
+An arrow-key based multi-select prompt will appear:
+
+    ? Which compilers would you like to install?
+      [ ] C/C++ (Emscripten)
+      [ ] Rust (wasm32)
+      [ ] Zig
+
+    (Space: select/deselect, Enter: confirm)
+
+Use arrow keys to navigate, Space to toggle [●], and Enter to confirm.
+Selected compilers will be automatically downloaded, installed, and
+added to your PATH.
+
+### Manual
+
+Download `jelll.exe` from GitHub and add to PATH.
+Run `setup.bat` for standalone toolchain installation.
+
+---
+
+## 4. Input File Format (.jelll)
+
+JELLL source files use `lang.X { ... }` blocks to embed multiple languages.
+
+Supported extensions: `.jelll` (recommended), `.jsbc`, `.tsbc`, `.tsxbc` (legacy)
+
+### Syntax
+
+    lang.c {
+        // C/C++ code -> compiled to WASM
+    }
+
+    lang.rs {
+        // Rust code -> compiled to WASM (V4+)
+    }
+
+    lang.zig {
+        // Zig code -> compiled to WASM (V4+)
+    }
+
+    lang.js {
+        // JavaScript code
+    }
+
+    lang.ts {
+        // TypeScript code
+    }
+
+    lang.tsx {
+        // TSX code
+    }
+
+    lang.css {
+        // CSS -> injected into <style> in index.html
+    }
+
+    lang.html {
+        // HTML -> injected into <body> in index.html
+    }
+
+### Rules
+
+- Multiple blocks of the same type are concatenated in order
+- `.jelll` files allow JS/TS/TSX blocks to coexist (auto-detect mode)
+- Compile mode is determined by highest-priority block: TSX > TS > JS
+- Comments and strings inside code are correctly ignored by the parser
+- Every file must have at least one native block (C/Rust/Zig) and one script block
+
+---
+
+## 5. Language Blocks
+
+| Block      | Language    | Output                        |
+|------------|-------------|-------------------------------|
+| `lang.c`   | C/C++       | dist/native.wasm (via emcc)   |
+| `lang.rs`  | Rust        | dist/native.wasm (via rustc)  |
+| `lang.zig` | Zig         | dist/native.wasm (via zig)    |
+| `lang.js`  | JavaScript  | dist/bundle.js (via esbuild)  |
+| `lang.ts`  | TypeScript  | dist/bundle.js (via esbuild)  |
+| `lang.tsx` | TSX         | dist/bundle.js (via esbuild)  |
+| `lang.css` | CSS         | dist/index.html <style>       |
+| `lang.html`| HTML        | dist/index.html <body>        |
+
+### Multi-language WASM
+
+C, Rust, and Zig blocks can coexist in a single file.
+Each is compiled to a `.o` object file, then linked together into
+one `native.wasm` via Emscripten.
+
+### Mixed Script Blocks (.jelll)
+
+In `.jelll` files, all script blocks (js/ts/tsx) are concatenated in source
+order and compiled together.
+
+---
+
+## 6. File Inclusion (call directive)
+
+Split large projects into multiple files using `call`:
+
+    // main.jelll
+    call "components/math.jelll"
+    call "components/ui.jelll"
+
+    lang.c { ... }
+    lang.ts { ... }
+
+### Behavior
+- `call "path"` inlines the target file's contents before parsing
+- Paths are relative to the calling file's directory
+- Recursive: called files can also use `call`
+- Circular reference detection prevents infinite loops
+
+---
+
+## 7. @jelll-sync (Struct Synchronization)
+
+Annotate C structs with `// @jelll-sync` to auto-generate:
+- C accessor functions (getter/setter for each field)
+- TS wrapper class with properties mapped to C memory
+
+### C Side
+
+    // @jelll-sync
+    struct Vector2 {
+        float x;
+        float y;
+    };
+
+    extern "C" {
+        float Vector2_length(Vector2* self) {
+            return sqrtf(self->x * self->x + self->y * self->y);
+        }
+    }
+
+### Auto-generated TS (available in all script blocks)
+
+    const v = new Vector2();
+    v.x = 3.0;
+    v.y = 4.0;
+    console.log(v.length());  // Calls C function via WASM
+
+### Method Convention
+- Define methods as: `ReturnType StructName_methodName(StructName* self, ...)`
+- JELLL auto-detects and wraps them in the TS class
+
+---
+
+## 8. Development Mode (jelll dev)
+
+    jelll dev app.jelll
+
+Starts a live development server with file watching:
+
+1. Initial build is performed
+2. Local dev server starts at http://127.0.0.1:8000
+3. File changes are detected every 500ms
+4. Automatic rebuild on save (Ctrl+S)
+
+Equivalent: `jelll --watch app.jelll`
+
+---
+
+## 9. Build Pipeline
+
+    jelll app.jelll
+
+1. **Preprocess** — Expand `call` directives (recursive file inclusion)
+2. **Parse** — Extract all `lang.X { ... }` blocks
+3. **Mode Detection** — Determine JS/TS/TSX from blocks present
+4. **@jelll-sync** — Parse annotated structs, generate accessors + classes
+5. **Write Intermediates** — `.bc_build/core.cpp` + `.bc_build/entry.X`
+6. **Compile Native** — C via emcc, Rust via rustc, Zig via zig
+7. **Link WASM** — All object files linked into `native.wasm`
+8. **JS Bundle** — `esbuild entry.X --bundle --minify --format=esm`
+9. **HTML Generate** — Create `index.html` with CSS/HTML injection
+
+---
+
+## 10. Output Structure
+
+    project/
+    ├── app.jelll             # Source file
+    ├── .bc_build/           # Intermediate build files
+    │   ├── core.cpp         # Extracted C code + sync accessors
+    │   ├── core.rs          # Extracted Rust code (if any)
+    │   ├── core.zig         # Extracted Zig code (if any)
+    │   ├── entry.tsx        # Glue code + sync classes + script blocks
+    │   ├── emcc.stderr.log
+    │   └── esbuild.stderr.log
+    └── dist/                # Deploy this directory
+        ├── native.wasm      # Native code -> WASM
+        ├── bundle.js        # Bundled JS/TS (ESM)
+        └── index.html       # HTML with CSS + markup
+
+---
+
+## 11. WASM Runtime API
+
+| Global         | Type               | Description                        |
+|----------------|--------------------|-------------------------------------|
+| `native`       | Object             | All extern "C" functions from WASM  |
+| `sharedBuffer` | SharedArrayBuffer  | 16 MB shared buffer for data        |
+| `sharedMemory` | WebAssembly.Memory | Shared linear memory (256 pages)    |
+
+    const result = native.add(21, 21);   // Call C function
+    const view = new Uint8Array(sharedBuffer);  // Direct memory access
+
+---
+
+## 12. CLI Reference
+
+| Command                   | Description                             |
+|---------------------------|-----------------------------------------|
+| `jelll <file.jelll>`      | Build the specified file                |
+| `jelll dev <file.jelll>`  | Start dev server with live reload       |
+| `jelll --watch <file>`    | Alias for `jelll dev`                   |
+| `jelll --setup`           | Launch interactive toolchain installer  |
+| `jelll setup`             | Alias for `jelll --setup`               |
+
+---
+
+## 13. Error Reference
+
+| Error                           | Solution                              |
+|---------------------------------|---------------------------------------|
+| Unsupported file extension      | Use .jelll, .jsbc, .tsbc, or .tsxbc    |
+| No lang.c section found         | Add a lang.c { } block               |
+| No script section found         | Add lang.js/ts/tsx { } block          |
+| emcc not found in PATH          | Run `jelll --setup` or install manually|
+| esbuild not found in PATH       | Run: npm i -g esbuild                 |
+| rustc not found in PATH         | Run `jelll --setup` or install Rust   |
+| zig not found in PATH           | Run `jelll --setup` or install Zig    |
+| Circular call detected          | Check call directives for loops       |
+| Failed to read call target      | Verify the file path in call "..."    |
+| emcc build failed               | Check C code; see .bc_build/*.log     |
+| esbuild bundle failed           | Check script code; see .bc_build/*.log|
+
+---
+
+## 14. Examples
+
+### Minimal Example
+
+    lang.c {
+    extern "C" { int add(int a, int b) { return a + b; } }
+    }
+
+    lang.js {
+    document.body.textContent = 'add(2,3) = ' + native.add(2, 3);
+    }
+
+### Multi-language Example (C + Rust + Zig)
+
+    lang.c {
+    extern "C" { int calc_c() { return 10; } }
+    }
+
+    lang.rs {
+    #[no_mangle] pub extern "C" fn calc_rs() -> i32 { 20 }
+    }
+
+    lang.zig {
+    export fn calc_zig() i32 { return 30; }
+    }
+
+    lang.js {
+    console.log(native.calc_c() + native.calc_rs() + native.calc_zig());
+    }
+
+### Full Example (CSS + HTML + mixed scripts + call)
+
+    call "math.jelll"
+
+    lang.c {
+    extern "C" { int square(int x) { return x * x; } }
+    }
+
+    lang.css {
+    body { background: #0f0f23; color: #eee; font-family: monospace; }
+    }
+
+    lang.html {
+    <div id="app"></div>
+    }
+
+    lang.js {
+    const el = document.getElementById('app');
+    el.textContent = 'square(7) = ' + native.square(7);
+    }
+
+### @jelll-sync Example
+
+    lang.c {
+    #include <math.h>
+
+    // @jelll-sync
+    struct Circle {
+        float x;
+        float y;
+        float radius;
+    };
+
+    extern "C" {
+        float Circle_area(Circle* self) {
+            return 3.14159f * self->radius * self->radius;
+        }
+    }
+    }
+
+    lang.ts {
+    const c = new Circle();
+    c.x = 100; c.y = 200; c.radius = 50;
+    console.log('Area:', c.area());
+    }
+
+---
+
+> JELLL V5 — C, Rust, Zig and JS in one file. Ship to the web.

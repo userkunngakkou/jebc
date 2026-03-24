@@ -1,0 +1,13 @@
+[JELLL] Building with MSVC...
+Microsoft(R) C/C++ Optimizing Compiler Version 19.44.35221 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+jelll.cpp
+jelll.cpp(308): error C2017: エスケープシーケンスの使い方が正しくありません。
+jelll.cpp(308): error C2146: 構文エラー: ')' が、識別子 's' の前に必要です。
+jelll.cpp(308): error C2017: エスケープシーケンスの使い方が正しくありません。
+jelll.cpp(308): error C2059: 構文エラー: ')'
+jelll.cpp(308): warning C4129: 's': 認識できない文字エスケープ シーケンスです
+jelll.cpp(308): error C2059: 構文エラー: ')'
+jelll.cpp(830): warning C4819: ファイルは、現在のコード ページ (932) で表示できない文字を含んでいます。データの損失を防ぐために、ファイルを Unicode 形式で保存してください。
+jelll.cpp(1194): error C2065: 'deps': 定義されていない識別子です。
